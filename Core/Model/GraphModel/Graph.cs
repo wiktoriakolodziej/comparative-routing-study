@@ -12,13 +12,14 @@ public class Graph
 
     public List<Edge> GetWaitingEdges(int vertexId)
     {
-        var waitingEdges = new List<Edge>();
-        Adjacency.TryGetValue(vertexId, out var edges);
-        if(edges == null) return waitingEdges;
+        var edges = GetEdges(vertexId);
 
-        waitingEdges.AddRange(edges.Where(x => x.To.Equals(x.From)));
+        return edges.Where(x => x.Type == EdgeType.Wait).ToList();
+    }
 
-        return waitingEdges;
+    public Vertex GetVertex(int id)
+    {
+        return Vertices[id];
     }
 }
 

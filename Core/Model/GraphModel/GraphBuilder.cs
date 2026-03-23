@@ -45,7 +45,8 @@ public class GraphBuilder(GtfsFeed feed)
                 {
                     From = fromVertexId,
                     To = toVertexId,
-                    Weight = weight
+                    Weight = weight,
+                    Type = EdgeType.Travel
                 });
             }
         }
@@ -59,12 +60,14 @@ public class GraphBuilder(GtfsFeed feed)
             for (var i = 0; i < stopTimes.Count - 1; i++)
             {
                 var fromVertexId = graph.Vertices.First(x => x.StopId == stopTimes[i].StopId && x.TripId == stopTimes[i].TripId).Id;
+                var toVertexId = graph.Vertices.First(x => x.StopId == stopTimes[i + 1].StopId && x.TripId == stopTimes[i + 1].TripId).Id;
                 var weight = stopTimes[i + 1].ArrivalTime - stopTimes[i].ArrivalTime;
                 graph.Adjacency[fromVertexId].Add(new Edge()
                 {
                     From = fromVertexId,
-                    To = fromVertexId,
-                    Weight = weight
+                    To = toVertexId,
+                    Weight = weight,
+                    Type = EdgeType.Wait
                 });
             }
         }
