@@ -11,8 +11,7 @@ public class DijkstraTests
     {
         var gtfsFolderPath = Path.Combine(Directory.GetCurrentDirectory(), @"Test\TestData");
 
-        var loader = new GtfsLoader();
-        var feed = loader.LoadGtfsFeed(gtfsFolderPath);
+        var feed = GtfsLoader.LoadGtfsFeed(gtfsFolderPath);
 
         var builder = new GraphBuilder(feed);
 

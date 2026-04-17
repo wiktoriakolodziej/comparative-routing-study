@@ -12,8 +12,7 @@ public class GraphBuilderTests
     {
         // 1. Przygotowanie danych testowych (GtfsFeed)
         var gtfsFolderPath = Path.Combine(Directory.GetCurrentDirectory(), @"Test\TestData");
-        var loader = new GtfsLoader();
-        GtfsFeed feed = loader.LoadGtfsFeed(gtfsFolderPath);
+        GtfsFeed feed = GtfsLoader.LoadGtfsFeed(gtfsFolderPath);
 
         var builder = new GraphBuilder(feed);
 

@@ -14,8 +14,7 @@ public class GtfsLoaderAndGraphTests
         Assert.True(Directory.Exists(gtfsFolderPath), $"Folder {gtfsFolderPath} nie istnieje.");
 
         // Uruchamiamy loader
-        var loader = new GtfsLoader();
-        GtfsFeed feed = loader.LoadGtfsFeed(gtfsFolderPath);
+        GtfsFeed feed = GtfsLoader.LoadGtfsFeed(gtfsFolderPath);
 
         // Sprawdzenie podstawowej poprawności wczytania danych
 

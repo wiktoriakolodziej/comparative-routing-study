@@ -4,20 +4,20 @@ namespace RouteAnalyzer.Core.GtfsParser;
 
 internal class GtfsLoader
 {
-    private readonly GtfsFeed feed = new();
 
-    public GtfsFeed LoadGtfsFeed(string gtfsFolderPath)
+    public static GtfsFeed LoadGtfsFeed(string gtfsFolderPath)
     {
+        var feed = new GtfsFeed();
         var stopsFilePath = Path.Combine(gtfsFolderPath, "stops.txt");
         var tripsFilePath = Path.Combine(gtfsFolderPath, "trips.txt");
         var stopTimesFilePath = Path.Combine(gtfsFolderPath, "stop_times.txt");
-        LoadStops(stopsFilePath);
-        LoadTrips(tripsFilePath);
-        LoadStopTimes(stopTimesFilePath);
+        LoadStops(stopsFilePath, feed);
+        LoadTrips(tripsFilePath, feed);
+        LoadStopTimes(stopTimesFilePath, feed);
         return feed;
     }
 
-    private void LoadStops(string stopsFilePath)
+    private static void LoadStops(string stopsFilePath, GtfsFeed feed)
     {
         var lines = File.ReadAllLines(stopsFilePath);
         foreach (var line in lines.Skip(1))
@@ -34,7 +34,7 @@ internal class GtfsLoader
         }
     }
 
-    private void LoadTrips(string tripsFilePath)
+    private static void LoadTrips(string tripsFilePath, GtfsFeed feed)
     {
         var lines = File.ReadAllLines(tripsFilePath);
         foreach (var line in lines.Skip(1))
@@ -50,7 +50,7 @@ internal class GtfsLoader
         }
     }
 
-    private void LoadStopTimes(string stopTimesFilePath)
+    private static void LoadStopTimes(string stopTimesFilePath, GtfsFeed feed)
     {
         var lines = File.ReadAllLines(stopTimesFilePath);
         foreach (var line in lines.Skip(1))
@@ -60,8 +60,8 @@ internal class GtfsLoader
             {
                 TripId = int.Parse(parts[0]),
                 StopId = int.Parse(parts[3]),
-                ArrivalTime = int.Parse(parts[1]),
-                DepartureTime = int.Parse(parts[2]),
+                ArrivalTime = ParseTimeToSeconds(parts[1]),
+                DepartureTime = ParseTimeToSeconds(parts[2]),
                 StopSequence = int.Parse(parts[4])
             };
             feed.StopTimes.Add(stopTime);
@@ -74,6 +74,16 @@ internal class GtfsLoader
                 feed.StopTimesByTripId.GetValueOrDefault(stopTime.TripId) ?? [];
             feed.StopTimesByTripId[stopTime.TripId].Add(stopTime);
         }
+    }
+
+    //remember that GTFS times can exceed 24:00:00, e.g. 25:30:00 means 1:30 AM next day
+    private static int ParseTimeToSeconds(string timeStr)
+    {
+        var parts = timeStr.Split(':');
+        int hours = int.Parse(parts[0]);
+        int minutes = int.Parse(parts[1]);
+        int seconds = int.Parse(parts[2]);
+        return hours * 3600 + minutes * 60 + seconds;
     }
 }
 
