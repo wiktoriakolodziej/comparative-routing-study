@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AlgorithmComparison.RaptorRealtime\AlgorithmComparison.RaptorRealtime.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.Realtime\AlgorithmComparison.Realtime.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.Algorithms\AlgorithmComparison.Algorithms.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.Core\AlgorithmComparison.Core.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.GTFS\AlgorithmComparison.GTFS.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.Validation\AlgorithmComparison.Validation.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,3 +1,0 @@
-route_id,service_id,trip_id
-10,100,1000
-10,100,1001

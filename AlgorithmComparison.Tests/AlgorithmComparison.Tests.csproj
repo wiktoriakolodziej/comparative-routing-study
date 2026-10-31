@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AlgorithmComparison.Algorithms\AlgorithmComparison.Algorithms.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.CLI\AlgorithmComparison.CLI.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.RaptorRealtime\AlgorithmComparison.RaptorRealtime.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.Realtime\AlgorithmComparison.Realtime.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.Core\AlgorithmComparison.Core.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.GTFS\AlgorithmComparison.GTFS.csproj" />
+    <ProjectReference Include="..\AlgorithmComparison.Validation\AlgorithmComparison.Validation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <None Update="Realtime\Fixtures\*.pb" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
