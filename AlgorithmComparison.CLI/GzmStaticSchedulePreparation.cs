@@ -18,6 +18,8 @@ public static class GzmStaticSchedulePreparation
             ?? throw new IOException("Nie można ustalić katalogu aplikacji dla pobrania GTFS.");
         var module = new[]
         {
+            Path.Combine(packageRoot, "AlgorithmComparison.CLI", "GzmData.psm1"),
+            Path.Combine(AppContext.BaseDirectory, "GzmData.psm1"),
             Path.Combine(packageRoot, "tools", "GzmData.psm1"),
             Path.Combine(packageRoot, "tools", "PortableRealtime", "GzmData.psm1")
         }.FirstOrDefault(File.Exists)

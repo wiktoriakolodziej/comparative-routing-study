@@ -83,7 +83,7 @@ public sealed class GzmStaticSchedulePreparationTests
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "GZM próba O'Brien-" + Guid.NewGuid().ToString("N"));
         public string DataRoot => Path.Combine(Root, "DataRealTime", "Slask");
         public string Schedule => Path.Combine(DataRoot, "static", "current");
-        public string Module => Path.Combine(Root, "tools", "GzmData.psm1");
+        public string Module => Path.Combine(Root, "AlgorithmComparison.CLI", "GzmData.psm1");
         public Files()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Module)!);

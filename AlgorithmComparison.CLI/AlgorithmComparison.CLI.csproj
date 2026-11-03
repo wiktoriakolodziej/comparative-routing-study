@@ -16,4 +16,8 @@
     <ProjectReference Include="..\AlgorithmComparison.Validation\AlgorithmComparison.Validation.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="GzmData.psm1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
