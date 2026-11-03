@@ -23,33 +23,38 @@ public sealed class RealtimeMenuTests
     }
 
     [Fact]
-    public void MenuHandlesCancellationAndRejectsRedirectedInput()
+    public void MenuHandlesCancellationBeforeDownloadingAndRejectsRedirectedInput()
     {
         Assert.Throws<OperationCanceledException>(() => ApplicationMenu.Select(new MenuConsole(new[] { ConsoleKey.Escape })));
         Assert.Throws<ArgumentException>(() => ApplicationMenu.Select(new MenuConsole(Array.Empty<ConsoleKey>()) { IsInputRedirected = true }));
-        var console = new MenuConsole(new[] { ConsoleKey.Enter }, new[] { "anuluj" });
-        Assert.Throws<OperationCanceledException>(() => RealtimeRaptorMenu.Read(console, (_, _) => throw new Exception("Must not load"),
-            Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()), new MenuClock()));
+        Assert.Throws<OperationCanceledException>(() => RealtimeRaptorMenu.Read(new MenuConsole(new[] { ConsoleKey.Escape }),
+            (_, _) => throw new Exception("Must not load"), Root(), new MenuClock(), _ => throw new Exception("Must not download")));
     }
 
     [Fact]
-    public void LiveMenuBuildsWatchConfigurationAndLoadsNetworkOnlyOnce()
+    public void LiveMenuDownloadsTodaysScheduleBeforeLoadingItAndBuildsWatchConfiguration()
     {
-        var root = Path.Combine(Path.GetTempPath(), "menu-" + Guid.NewGuid().ToString("N"));
-        var console = new MenuConsole(new[] { ConsoleKey.Enter, ConsoleKey.DownArrow, ConsoleKey.Enter }, new[]
+        var root = Root();
+        var console = new MenuConsole(new[] { ConsoleKey.Enter, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter }, new[]
         {
-            root, "2026-10-17", "", "missing", "A", "C", "17:30", "-1", "2", "500,5", "", "0", "15", "3", "", ""
+            "missing", "A", "C", "17:30", "-1", "2", "500,5", "", "0", "15", "0", "3", "", ""
         });
+        var downloaded = false;
         var calls = 0;
         var result = RealtimeRaptorMenu.Read(console, (path, day) =>
         {
-            calls++; Assert.Equal(root, path); Assert.Equal(Day, day); return Network();
-        }, root, new MenuClock());
+            Assert.True(downloaded); calls++; Assert.Equal(root, path); Assert.Equal(Day, day); return Network();
+        }, root, new MenuClock(), day =>
+        {
+            Assert.Equal(Day, day); Assert.False(downloaded); downloaded = true; return root;
+        });
         Assert.Equal(1, calls);
         Assert.Contains("--compare", result.Arguments);
         Assert.Contains("--watch", result.Arguments);
         Assert.Contains("--pareto", result.Arguments);
         Assert.DoesNotContain("--snapshot", result.Arguments);
+        Assert.Equal(root, Value(result, "--gtfs"));
+        Assert.Equal("2026-10-18", Value(result, "--date"));
         Assert.Equal("17:30:00", Value(result, "--departure"));
         Assert.Equal("2", Value(result, "--max-transfers"));
         Assert.Equal("500.5", Value(result, "--radius-metres"));
@@ -57,14 +62,18 @@ public sealed class RealtimeMenuTests
         Assert.Equal("3", Value(result, "--count"));
         Assert.False(Directory.Exists(root));
         Assert.Contains(console.Lines, line => line.Contains("WYMAGANE POŁĄCZENIE Z INTERNETEM"));
-        Assert.Contains(console.Lines, line => line.Contains("bieżący dzień"));
+        Assert.Contains(console.Lines, line => line.Contains("automatycznie pobrany rozkład"));
         Assert.Contains(console.Lines, line => line.Contains("Nie znaleziono"));
+        Assert.Contains(console.Lines, line => line == "Aktualność danych jest sprawdzana według czasu ich utworzenia.");
+        Assert.Contains(console.Lines, line => line.Contains("Czas oczekiwania przed kolejnym pomiarem"));
+        Assert.Contains(console.Lines, line => line.Contains("Ścieżka do zapisu raportu wynikowego"));
+        Assert.DoesNotContain(console.Lines, line => line.Contains("0 = do Ctrl+C"));
     }
 
     [Fact]
-    public void ReplayMenuUsesSnapshotDateAndResolvesAmbiguousStopNames()
+    public void ReplayMenuUsesSnapshotDateExplainsSavedSchedulesAndNeverDownloads()
     {
-        var root = Path.Combine(Path.GetTempPath(), "menu-" + Guid.NewGuid().ToString("N"));
+        var root = Root();
         Directory.CreateDirectory(Path.Combine(root, "static", "gtfs-20261018"));
         var snapshot = Path.Combine(root, "tripUpdates.pb");
         File.WriteAllBytes(snapshot, new FeedMessage { Header = new FeedHeader
@@ -74,7 +83,8 @@ public sealed class RealtimeMenuTests
             var console = new MenuConsole(new[] { ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter,
                 ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.Enter },
                 new[] { snapshot, "", "Centrum", "C", "", "", "", "", "", "" });
-            var result = RealtimeRaptorMenu.Read(console, (_, day) => { Assert.Equal(Day, day); return Network(); }, root, new MenuClock());
+            var result = RealtimeRaptorMenu.Read(console, (_, day) => { Assert.Equal(Day, day); return Network(); },
+                root, new MenuClock(), _ => throw new Exception("Offline must not download"));
             Assert.Contains("--replay", result.Arguments);
             Assert.DoesNotContain("--watch", result.Arguments);
             Assert.DoesNotContain("--pareto", result.Arguments);
@@ -82,29 +92,54 @@ public sealed class RealtimeMenuTests
             Assert.Equal("B", Value(result, "--from"));
             Assert.Equal("12:00:00", Value(result, "--departure"));
             Assert.Contains(console.Lines, line => line.Contains("Centrum [B]"));
+            Assert.Contains(console.Lines, line => line.Contains("18.10.2026 — zapisany rozkład"));
+            Assert.Contains(console.Lines, line => line.Contains("To zapisane kopie rozkładów"));
+            Assert.Contains(console.Lines, line => line.Contains("nie pobiera nowych danych"));
+            Assert.DoesNotContain(console.Lines, line => line.Contains("Kiedy zakończyć"));
         }
         finally { Directory.Delete(root, true); }
     }
 
     [Fact]
-    public void LiveZeroCyclesMeansUntilCancellation()
+    public void LiveContinuousModeIsAnExplicitChoiceRatherThanZeroCount()
     {
-        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var console = new MenuConsole(new[] { ConsoleKey.Enter, ConsoleKey.Enter },
-            new[] { root, "", "A", "C", "", "", "", "", "", "0", "", "" });
-        var result = RealtimeRaptorMenu.Read(console, (_, _) => Network(), root, new MenuClock());
+        var root = Root();
+        var console = new MenuConsole(new[] { ConsoleKey.Enter, ConsoleKey.Enter, ConsoleKey.DownArrow, ConsoleKey.Enter },
+            new[] { "A", "C", "", "", "", "", "", "", "" });
+        var result = RealtimeRaptorMenu.Read(console, (_, _) => Network(), root, new MenuClock(), _ => root);
         Assert.Equal(int.MaxValue.ToString(), Value(result, "--count"));
         Assert.Equal("now", Value(result, "--departure"));
+        Assert.Contains(console.Lines, line => line.Contains("Dopiero po ręcznym zatrzymaniu"));
+        Assert.Contains(console.Lines, line => line.Contains("zakończenie: ręcznie, skrótem Ctrl+C"));
+    }
+
+    [Fact]
+    public void FailedDownloadStopsBeforeLoadingOrSearching()
+    {
+        Assert.Throws<IOException>(() => RealtimeRaptorMenu.Read(new MenuConsole(new[] { ConsoleKey.Enter }),
+            (_, _) => throw new Exception("Must not load stale schedule"), Root(), new MenuClock(),
+            _ => throw new IOException("API unavailable")));
+    }
+
+    [Fact]
+    public void MidnightDuringDownloadStopsBeforeLoadingYesterdaysSchedule()
+    {
+        var now = Now;
+        var clock = new MutableClock(() => now);
+        Assert.Throws<InvalidDataException>(() => RealtimeRaptorMenu.Read(new MenuConsole(new[] { ConsoleKey.Enter }),
+            (_, _) => throw new Exception("Must not load yesterday's schedule"), Root(), clock,
+            _ => { now = now.AddDays(1); return Root(); }));
     }
 
     [Fact]
     public void MenuRejectsNetworkWithoutActiveTrips()
     {
-        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var console = new MenuConsole(new[] { ConsoleKey.Enter }, new[] { root, "" });
-        Assert.Throws<InvalidDataException>(() => RealtimeRaptorMenu.Read(console, (_, _) => Network(false), root, new MenuClock()));
+        var root = Root();
+        Assert.Throws<InvalidDataException>(() => RealtimeRaptorMenu.Read(new MenuConsole(new[] { ConsoleKey.Enter }),
+            (_, _) => Network(false), root, new MenuClock(), _ => root));
     }
 
+    private static string Root() => Path.Combine(Path.GetTempPath(), "menu-" + Guid.NewGuid().ToString("N"));
     private static string Value(RealtimeMenuSelection result, string name) => result.Arguments[Array.IndexOf(result.Arguments, name) + 1];
 
     private static TransitNetwork Network(bool active = true) => new()
@@ -117,6 +152,7 @@ public sealed class RealtimeMenuTests
     };
 
     private sealed class MenuClock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
+    private sealed class MutableClock(Func<DateTimeOffset> now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now(); }
     private sealed class MenuConsole(IEnumerable<ConsoleKey> keys, IEnumerable<string>? lines = null) : IInteractiveConsole
     {
         private readonly Queue<ConsoleKey> keys = new(keys);

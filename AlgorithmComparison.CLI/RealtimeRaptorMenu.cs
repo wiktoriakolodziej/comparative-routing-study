@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using AlgorithmComparison.Core.Models;
 using AlgorithmComparison.GTFS;
 using AlgorithmComparison.RaptorRealtime;
@@ -11,45 +12,57 @@ public sealed record RealtimeMenuSelection(string[] Arguments, TransitNetwork Ne
 public static class RealtimeRaptorMenu
 {
     public static RealtimeMenuSelection Read(IInteractiveConsole? terminal = null,
-        Func<string, DateOnly, TransitNetwork>? loader = null, string? dataRoot = null, TimeProvider? clock = null)
+        Func<string, DateOnly, TransitNetwork>? loader = null, string? dataRoot = null, TimeProvider? clock = null,
+        Func<DateOnly, string>? prepareLiveGtfs = null)
     {
         terminal ??= new InteractiveConsole();
         loader ??= (path, day) => new GtfsLoader().Load(path, day);
         clock ??= TimeProvider.System;
         dataRoot ??= FindDataRoot();
-        var replay = ChoiceMenu.Select("RAPTOR Realtime — źródło aktualizacji", new[]
+        var replay = ChoiceMenu.Select("RAPTOR Realtime — skąd pobierać informacje o opóźnieniach?", new[]
         {
-            "Na żywo: API GZM — WYMAGANE POŁĄCZENIE Z INTERNETEM",
-            "Offline: odtworzenie zapisanej migawki TripUpdates (.pb)"
-        }, terminal) == 1;
+            "Online — bieżące opóźnienia z API GZM (wymaga internetu)",
+            "Offline — odtworzenie wcześniej zapisanej aktualizacji"
+        }, terminal,
+            "Online: program pobierze aktualny rozkład GTFS i będzie sprawdzać bieżące opóźnienia.\n" +
+            "Offline: ponownie obliczy podróż na podstawie zapisanego pliku aktualizacji (.pb).\n" +
+            "Tryb offline nie pobiera nowych danych i wymaga rozkładu z tej samej sesji co aktualizacja.") == 1;
 
-        var directories = Directory.Exists(Path.Combine(dataRoot, "static"))
-            ? Directory.GetDirectories(Path.Combine(dataRoot, "static")).OrderDescending(StringComparer.Ordinal).ToArray()
-            : Array.Empty<string>();
-        var selected = directories.Length == 0 ? 0 : ChoiceMenu.Select(
-            "Wybierz rozkład GTFS zgodny z dniem i identyfikatorami aktualizacji",
-            directories.Select(Path.GetFileName).Select(n => n!).Append("Inny folder…").ToArray(), terminal);
-        var gtfs = selected < directories.Length ? directories[selected] : ReadText("Folder GTFS", null, terminal);
-        gtfs = Path.GetFullPath(gtfs);
         var zone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw");
         var evaluationTime = clock.GetUtcNow();
         string? snapshot = null;
+        string gtfs;
+        DateOnly date;
         if (replay)
         {
-            snapshot = Path.GetFullPath(ReadText("Plik migawki tripUpdates.pb", null, terminal));
+            snapshot = Path.GetFullPath(ReadText("Ścieżka do zapisanej aktualizacji opóźnień (.pb)", null, terminal));
             var feed = FeedMessage.Parser.ParseFrom(File.ReadAllBytes(snapshot));
             if (feed.Header is not { HasTimestamp: true })
-                throw new InvalidDataException("Migawka do odtworzenia musi zawierać timestamp nagłówka.");
+                throw new InvalidDataException("Zapisana aktualizacja musi zawierać datę i czas utworzenia.");
             evaluationTime = DateTimeOffset.FromUnixTimeSeconds(checked((long)feed.Header.Timestamp));
+            var defaultDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(evaluationTime, zone).DateTime);
+            terminal.WriteLine($"Aktualizacja została utworzona: {TimeZoneInfo.ConvertTime(evaluationTime, zone):dd.MM.yyyy HH:mm:ss} (czas w Polsce).");
+            while (!DateOnly.TryParseExact(ReadText("Dzień rozkładu (yyyy-MM-dd)", defaultDate.ToString("yyyy-MM-dd"), terminal),
+                "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
+                terminal.WriteLine("Podaj poprawną datę.");
+            var directories = Directory.Exists(Path.Combine(dataRoot, "static"))
+                ? Directory.GetDirectories(Path.Combine(dataRoot, "static")).OrderDescending(StringComparer.Ordinal).ToArray()
+                : Array.Empty<string>();
+            var selected = directories.Length == 0 ? 0 : ChoiceMenu.Select("Wybierz zapisany rozkład do odtworzenia pomiaru",
+                directories.Select(ScheduleLabel).Append("Wskaż inny folder z rozkładem GTFS…").ToArray(), terminal,
+                "To zapisane kopie rozkładów, a nie różne warianty algorytmu.\n" +
+                "Data opisuje dzień przygotowania kopii. Końcówka nazwy odróżnia kolejne pobrania.\n" +
+                "Wybierz rozkład użyty przy zapisie aktualizacji; sama zgodność dat nie gwarantuje zgodności kursów.");
+            gtfs = Path.GetFullPath(selected < directories.Length ? directories[selected] : ReadText("Folder z rozkładem GTFS", null, terminal));
         }
-        var defaultDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(evaluationTime, zone).DateTime);
-        DateOnly date;
-        while (true)
+        else
         {
-            var text = ReadText("Dzień rozkładu (yyyy-MM-dd)", defaultDate.ToString("yyyy-MM-dd"), terminal);
-            if (DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
-                && (replay || date == defaultDate)) break;
-            terminal.WriteLine(replay ? "Podaj poprawną datę." : "Tryb na żywo wymaga rozkładu na bieżący dzień w Polsce.");
+            date = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(evaluationTime, zone).DateTime);
+            terminal.WriteLine($"Pobieranie aktualnego rozkładu GZM na dzień {date:dd.MM.yyyy}. Wymagane połączenie z internetem.");
+            gtfs = Path.GetFullPath((prepareLiveGtfs ?? (day => GzmStaticSchedulePreparation.Download(day, dataRoot, terminal)))(date));
+            if (DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone).DateTime) != date)
+                throw new InvalidDataException("Podczas przygotowania zmienił się dzień. Uruchom konfigurację ponownie, aby pobrać właściwy rozkład.");
+            terminal.WriteLine($"Wybrano automatycznie pobrany rozkład: {gtfs}");
         }
         terminal.WriteLine("Wczytywanie GTFS…");
         var network = loader(gtfs, date);
@@ -61,10 +74,11 @@ public static class RealtimeRaptorMenu
         var pareto = ChoiceMenu.Select("Wariant wyszukiwania", new[]
         { "Single — najwcześniejszy przyjazd", "Pareto — czas przyjazdu i liczba przesiadek" }, terminal) == 1;
         var defaultDeparture = replay ? FormatTime(ServiceDayTime.ToSeconds(evaluationTime.ToUnixTimeSeconds(), date, zone)) : "now";
+        terminal.WriteLine("Wpisz godzinę wyjazdu albo now, aby w każdym pomiarze rozpoczynać podróż o aktualnej godzinie.");
         string departure;
         while (true)
         {
-            departure = ReadText("Godzina wyjazdu (HH:mm:ss lub now; dopuszczalne godziny > 23)", defaultDeparture, terminal);
+            departure = ReadText("Godzina wyjazdu (HH:mm:ss lub now; godziny po północy mogą przekraczać 23)", defaultDeparture, terminal);
             if (departure == "now") break;
             var parts = departure.Split(':');
             if (parts.Length == 2) departure += ":00";
@@ -82,10 +96,22 @@ public static class RealtimeRaptorMenu
             if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out radius) && double.IsFinite(radius) && radius >= 0) break;
             terminal.WriteLine("Podaj nieujemną, skończoną liczbę.");
         }
-        var maxAge = ReadNumber("Maksymalny wiek danych w sekundach", 300, 1, int.MaxValue, terminal);
-        var interval = replay ? 30 : ReadNumber("Przerwa między cyklami w sekundach", 30, 1, 86400, terminal);
-        var count = replay ? 1 : ReadNumber("Liczba cykli (0 = do Ctrl+C)", 10, 0, int.MaxValue, terminal);
-        var output = Path.GetFullPath(ReadText("Raport JSON (wynik ostatniego cyklu)",
+        terminal.WriteLine("Aktualność danych jest sprawdzana według czasu ich utworzenia.");
+        terminal.WriteLine("Przeterminowane prognozy nie są używane - przy braku aktualnych danych program korzysta z godzin rozkładowych.");
+        var maxAge = ReadNumber("Jak długo uznawać informacje o opóźnieniach za aktualne? (sekundy)", 300, 1, int.MaxValue, terminal);
+        var interval = 30;
+        var count = 1;
+        if (!replay)
+        {
+            interval = ReadNumber("Czas oczekiwania przed kolejnym pomiarem (sekundy)", 30, 1, 86400, terminal);
+            var continuous = ChoiceMenu.Select("Kiedy zakończyć badanie?", new[]
+            {
+                "Po wykonaniu określonej liczby pomiarów",
+                "Dopiero po ręcznym zatrzymaniu skrótem Ctrl+C"
+            }, terminal, "Jeden pomiar obejmuje pobranie aktualizacji i porównanie wariantów RAPTOR-a.") == 1;
+            count = continuous ? int.MaxValue : ReadNumber("Liczba kolejnych pomiarów", 10, 1, int.MaxValue, terminal);
+        }
+        var output = Path.GetFullPath(ReadText("Ścieżka do zapisu raportu wynikowego",
             Path.Combine(dataRoot, "validation", $"session-{(replay ? "replay" : "live")}-{clock.GetUtcNow():yyyyMMddTHHmmssfffZ}.json"), terminal));
         var args = new List<string>
         {
@@ -96,16 +122,42 @@ public static class RealtimeRaptorMenu
         };
         if (pareto) args.Add("--pareto");
         if (replay) args.AddRange(new[] { "--snapshot", snapshot!, "--replay" });
-        else args.AddRange(new[] { "--watch", "--count", (count == 0 ? int.MaxValue : count).ToString(CultureInfo.InvariantCulture),
+        else args.AddRange(new[] { "--watch", "--count", count.ToString(CultureInfo.InvariantCulture),
             "--interval-seconds", interval.ToString(CultureInfo.InvariantCulture), "--archive", Path.Combine(dataRoot, "live") });
-        terminal.WriteLine( replay ? "Odtwarzanie offline — internet nie jest wymagany." : "Badanie na żywo — WYMAGANE POŁĄCZENIE Z INTERNETEM.");
+        terminal.WriteLine(replay ? "Odtwarzanie zapisanej aktualizacji — internet nie jest wymagany." : "Badanie na żywo — WYMAGANE POŁĄCZENIE Z INTERNETEM.");
         terminal.WriteLine($"GTFS: {gtfs}; dzień: {date:yyyy-MM-dd}; {from} → {to}; {(pareto ? "Pareto" : "single")}; wyjazd: {departure}.");
-        terminal.WriteLine("Benchmark porówna zwykły RAPTOR, kontrolny rozkład bazowy i realtime: 1 rozgrzewka + 5 powtórzeń każdego wariantu.");
-        terminal.WriteLine($"Limit przesiadek: {transfers}; promień: {radius} m; maksymalny wiek danych: {maxAge} s.");
-        if (!replay) terminal.WriteLine($"Przerwa: {interval} s; cykle: {(count == 0 ? "do Ctrl+C" : count.ToString())}.");
-        terminal.WriteLine($"Raport ostatniego cyklu: {output}. Surowe migawki online: {Path.Combine(dataRoot, "live")}.");
+        terminal.WriteLine("Porównanie zwykłego RAPTOR-a, kontrolnego rozkładu bazowego i realtime: 1 rozgrzewka + 5 powtórzeń każdego wariantu.");
+        terminal.WriteLine($"Limit przesiadek: {transfers}; promień: {radius} m; prognozy ważne przez najwyżej {maxAge} s od ich utworzenia.");
+        if (!replay)
+        {
+            terminal.WriteLine($"Oczekiwanie po każdym pomiarze: {interval} s; zakończenie: {(count == int.MaxValue ? "ręcznie, skrótem Ctrl+C" : "po " + count + " pomiarach")}.");
+            terminal.WriteLine($"Pobrane aktualizacje: {Path.Combine(dataRoot, "live")}.");
+        }
+        terminal.WriteLine($"Ścieżka do zapisu raportu wynikowego: {output}.");
         _ = ReadText("Enter: rozpocznij; wpisz anuluj, aby zakończyć", "start", terminal);
+        if (!replay && DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(clock.GetUtcNow(), zone).DateTime) != date)
+            throw new InvalidDataException("Zmienił się dzień. Uruchom konfigurację ponownie, aby pobrać rozkład na bieżący dzień.");
         return new(args.ToArray(), network);
+    }
+
+    private static string ScheduleLabel(string directory)
+    {
+        var name = Path.GetFileName(directory);
+        DateOnly? day = name.StartsWith("gtfs-", StringComparison.Ordinal) && name.Length >= 13
+            && DateOnly.TryParseExact(name.Substring(5, 8), "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ? parsed : null;
+        var manifest = Path.Combine(directory, "download-manifest.json");
+        if (File.Exists(manifest))
+        {
+            try
+            {
+                using var json = JsonDocument.Parse(File.ReadAllText(manifest));
+                if (json.RootElement.TryGetProperty("DownloadedAt", out var at)
+                    && DateTimeOffset.TryParse(at.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var downloaded))
+                    return $"{(day.HasValue ? day.Value.ToString("dd.MM.yyyy") : name)} — pobrano {TimeZoneInfo.ConvertTime(downloaded, TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw")):dd.MM.yyyy HH:mm:ss} ({name})";
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException) { }
+        }
+        return day.HasValue ? $"{day.Value:dd.MM.yyyy} — zapisany rozkład ({name})" : name;
     }
 
     private static string ReadStop(string prompt, TransitNetwork network, IInteractiveConsole terminal)

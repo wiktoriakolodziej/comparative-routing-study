@@ -259,7 +259,7 @@ public static class RealtimeRaptorCommand
         }
         catch (OperationCanceledException) { Console.WriteLine("Anulowano konfigurację realtime."); return 130; }
         catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException or IOException
-            or UnauthorizedAccessException or Google.Protobuf.InvalidProtocolBufferException)
+            or UnauthorizedAccessException or JsonException or Google.Protobuf.InvalidProtocolBufferException)
         { Console.Error.WriteLine(ex.Message); return 1; }
     }
 

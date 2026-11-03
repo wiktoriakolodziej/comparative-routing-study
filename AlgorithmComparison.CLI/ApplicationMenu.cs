@@ -16,7 +16,7 @@ public sealed class InteractiveConsole : IInteractiveConsole
 
 public static class ChoiceMenu
 {
-    public static int Select(string title, IReadOnlyList<string> labels, ICheckboxConsole terminal)
+    public static int Select(string title, IReadOnlyList<string> labels, ICheckboxConsole terminal, string? helpText = null)
     {
         if (terminal.IsInputRedirected)
             throw new ArgumentException("Menu wymaga interaktywnej konsoli. W skryptach użyj benchmark lub raptor-realtime z parametrami.");
@@ -26,6 +26,7 @@ public static class ChoiceMenu
         {
             terminal.Clear();
             terminal.WriteLine(title);
+            if (helpText is not null) terminal.WriteLine(helpText);
             terminal.WriteLine("");
             for (var i = 0; i < labels.Count; i++)
                 terminal.WriteLine($"{(i == cursor ? ">" : " ")} {labels[i]}");
